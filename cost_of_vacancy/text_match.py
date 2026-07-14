@@ -18,20 +18,25 @@ def _normalize_tokens(text):
     return [t for t in text.split() if t and t not in _STOPWORDS]
 
 
-def name_matches(query, candidate, min_overlap=0.6):
-    """True if most of the meaningful tokens in `query` appear in `candidate`.
+def token_overlap_score(query, candidate):
+    """Fraction of `query`'s meaningful tokens that also appear in `candidate`.
 
     Deliberately permissive (token-overlap, not exact string equality) since
     hospital names in CMS data are inconsistently abbreviated/punctuated.
+    Returns 0.0 for an empty candidate or a query with no meaningful tokens.
     """
     if not candidate:
-        return False
+        return 0.0
     q_tokens = set(_normalize_tokens(query))
     if not q_tokens:
-        return False
+        return 0.0
     c_tokens = set(_normalize_tokens(candidate))
-    overlap = len(q_tokens & c_tokens) / len(q_tokens)
-    return overlap >= min_overlap
+    return len(q_tokens & c_tokens) / len(q_tokens)
+
+
+def name_matches(query, candidate, min_overlap=0.6):
+    """True if most of the meaningful tokens in `query` appear in `candidate`."""
+    return token_overlap_score(query, candidate) >= min_overlap
 
 
 def find_column(columns, *candidates):

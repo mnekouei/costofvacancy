@@ -1,8 +1,8 @@
 [
-  {"NPI": "1000000001", "pri_spec": "CARDIOLOGY"},
-  {"NPI": "1000000002", "pri_spec": "CARDIOLOGY"},
-  {"NPI": "1000000003", "pri_spec": "CARDIOLOGY"},
-  {"NPI": "1000000006", "pri_spec": "FAMILY PRACTICE"},
-  {"NPI": "1000000007", "pri_spec": "FAMILY PRACTICE"},
-  {"NPI": "1000000008", "pri_spec": "CARDIOLOGY"}
+  {"npi": "1000000001", "pri_spec": "CARDIOLOGY"},
+  {"npi": "1000000002", "pri_spec": "CARDIOLOGY"},
+  {"npi": "1000000003", "pri_spec": "CARDIOLOGY"},
+  {"npi": "1000000006", "pri_spec": "FAMILY PRACTICE"},
+  {"npi": "1000000007", "pri_spec": "FAMILY PRACTICE"},
+  {"npi": "1000000008", "pri_spec": "CARDIOLOGY"}
 ]

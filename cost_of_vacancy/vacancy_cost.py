@@ -33,6 +33,8 @@ class VacancyCostResult:
     lost_revenue_component: float
     locum_coverage_component: float
     recruitment_component: float
+    queried_hospital: str = None
+    hospital_ccn: str = None
 
     @property
     def total_cost_of_vacancy(self):
@@ -41,6 +43,8 @@ class VacancyCostResult:
     def to_dict(self):
         return {
             "hospital": self.hospital,
+            "queried_hospital": self.queried_hospital,
+            "hospital_ccn": self.hospital_ccn,
             "specialty": self.specialty,
             "vacant_days": self.vacant_days,
             "matched_provider_count": self.matched_provider_count,
@@ -54,13 +58,19 @@ class VacancyCostResult:
         }
 
 
-def compute_cost_of_vacancy(hospital, specialty, provider_financials, benchmarks, vacant_days=365):
+def compute_cost_of_vacancy(hospital, specialty, provider_financials, benchmarks, vacant_days=365,
+                             queried_hospital=None, hospital_ccn=None):
     """`provider_financials` is a list of dicts as returned by
     `provider_utilization.fetch_provider_financials` (each with at least
     `medicare_payment` and `medicare_allowed` keys). An empty list is valid
     input -- it means CMS billing data couldn't ground the revenue estimate,
     so `lost_revenue_component` comes out as 0 while the benchmark-driven
     locum/recruitment components are still computed.
+
+    `queried_hospital` (the raw user input) and `hospital_ccn` are optional
+    and purely informational -- they let callers show what CMS record the
+    query actually resolved to, distinct from `hospital` (the canonical
+    CMS-reported facility name used for the calculation).
     """
     if vacant_days < 0:
         raise ValueError("vacant_days must be >= 0")
@@ -93,4 +103,6 @@ def compute_cost_of_vacancy(hospital, specialty, provider_financials, benchmarks
         lost_revenue_component=lost_revenue,
         locum_coverage_component=locum_cost,
         recruitment_component=recruitment_cost,
+        queried_hospital=queried_hospital,
+        hospital_ccn=hospital_ccn,
     )

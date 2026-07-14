@@ -1,82 +1,113 @@
 """Resolve a hospital name + specialty into the set of clinician NPIs CMS
 reports as affiliated with that facility.
 
-Two CMS Provider Data Catalog datasets are combined:
+Confirmed against the live CMS Provider Data Catalog API (see
+scripts/diagnose_cms_api.py) rather than guessed:
 
-* **Facility Affiliation** (default id ``27ea-46a8``) -- links each
-  clinician NPI to the facilities (hospitals) they're affiliated with.
-* **National Downloadable File** (default id ``mj5m-pzi6``) -- gives each
-  NPI's primary specialty, used to narrow the affiliated clinicians down
+* **Hospital General Information** (``xubh-q36u``) maps a hospital name to
+  its CMS Certification Number (CCN, called ``facility_id`` here).
+* **Facility Affiliation** (``27ea-46a8``) maps a CCN to the NPIs of
+  clinicians affiliated with that facility -- it has no hospital-name field
+  at all, only the CCN, which is why the Hospital General Information
+  lookup has to happen first.
+* **National Downloadable File** (``mj5m-pzi6``) gives each NPI's primary
+  specialty (``pri_spec``), used to narrow the affiliated clinicians down
   to the requested specialty.
 
-Both ids are CMS Provider Data Catalog short ids that have been stable for
-years, but datasets do get retired/replaced, so callers can override them
-explicitly (see ``cli.py --facility-dataset-id`` / ``--specialty-dataset-id``).
+All three are queried through CMS's DKAN datastore API
+(``provider-data/api/1/datastore/query/{id}/0``), which supports real
+server-side filtering -- required since Facility Affiliation and the
+National Downloadable File each have millions of rows.
 """
-from .text_match import find_column, name_matches
+from .exceptions import AmbiguousHospitalError, HospitalNotFoundError
+from .text_match import token_overlap_score
 
-FACILITY_AFFILIATION_TITLE_HINTS = ["facility affiliation"]
-NATIONAL_DOWNLOADABLE_TITLE_HINTS = ["national downloadable file"]
+HOSPITAL_GENERAL_INFO_ID = "xubh-q36u"
+FACILITY_AFFILIATION_ID = "27ea-46a8"
+NATIONAL_DOWNLOADABLE_FILE_ID = "mj5m-pzi6"
 
-DEFAULT_FACILITY_AFFILIATION_ID = "27ea-46a8"
-DEFAULT_NATIONAL_DOWNLOADABLE_ID = "mj5m-pzi6"
-
-
-def _resolve(client, hints, default_id):
-    try:
-        return client.resolve_dataset_id(hints)
-    except Exception:
-        return default_id
+MIN_MATCH_SCORE = 0.6
+AMBIGUOUS_SCORE_GAP = 0.15
 
 
-def find_npis_for_hospital(client, hospital_name, dataset_id=None, fetch_limit=5000):
-    """Return NPIs of clinicians CMS lists as affiliated with `hospital_name`."""
-    fa_id = dataset_id or _resolve(client, FACILITY_AFFILIATION_TITLE_HINTS, DEFAULT_FACILITY_AFFILIATION_ID)
-    rows = client.fetch_rows(fa_id, keyword=hospital_name, limit=fetch_limit)
-    if not rows:
-        return []
-
-    columns = list(rows[0].keys())
-    npi_col = find_column(columns, "npi", "rndrng_npi")
-    facility_col = find_column(columns, "facility_name", "facility name", "facility")
-    type_col = find_column(columns, "facility_type", "facility type")
-
-    matched = set()
-    for row in rows:
-        facility_value = row.get(facility_col, "") if facility_col else ""
-        if not name_matches(hospital_name, facility_value):
-            continue
-        if type_col and row.get(type_col) and "hospital" not in str(row[type_col]).lower():
-            continue
-        npi = row.get(npi_col) if npi_col else None
-        if npi:
-            matched.add(str(npi))
-    return sorted(matched)
+def _chunked(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
 
 
-def filter_npis_by_specialty(client, npis, specialty, dataset_id=None, fetch_limit=20000):
+def resolve_hospital(client, hospital_name, state=None, dataset_id=None, limit=25):
+    """Look up candidate Hospital General Information rows for `hospital_name`,
+    scored by token overlap, best match first. Returns a list of
+    (score, row) tuples; `row` has at least `facility_id`, `facility_name`, `state`.
+    """
+    ds_id = dataset_id or HOSPITAL_GENERAL_INFO_ID
+    conditions = [("facility_name", "like", f"%{hospital_name.upper()}%")]
+    if state:
+        conditions.append(("state", "=", state.upper()))
+    rows = client.datastore_query(ds_id, conditions=conditions, limit=limit)
+
+    scored = [(token_overlap_score(hospital_name, row.get("facility_name", "")), row) for row in rows]
+    scored.sort(key=lambda pair: -pair[0])
+    return scored
+
+
+def best_hospital_match(client, hospital_name, state=None, dataset_id=None):
+    """Resolve `hospital_name` to a single best-matching Hospital General
+    Information row, or raise HospitalNotFoundError / AmbiguousHospitalError.
+    """
+    scored = resolve_hospital(client, hospital_name, state=state, dataset_id=dataset_id)
+    if not scored:
+        raise HospitalNotFoundError(
+            f"No hospital matching '{hospital_name}' found in CMS Hospital General Information data."
+        )
+
+    best_score, best_row = scored[0]
+    if best_score < MIN_MATCH_SCORE:
+        candidates = [(score, row.get("facility_name", ""), row.get("state", "")) for score, row in scored[:5]]
+        raise AmbiguousHospitalError(hospital_name, candidates)
+
+    if len(scored) > 1:
+        second_score, _ = scored[1]
+        if best_score - second_score < AMBIGUOUS_SCORE_GAP:
+            candidates = [(score, row.get("facility_name", ""), row.get("state", "")) for score, row in scored[:5]]
+            raise AmbiguousHospitalError(hospital_name, candidates)
+
+    return best_row
+
+
+def find_npis_for_ccn(client, ccn, dataset_id=None, limit=1000):
+    """Return NPIs of clinicians CMS lists as affiliated with the hospital
+    identified by `ccn` (a CMS Certification Number).
+    """
+    ds_id = dataset_id or FACILITY_AFFILIATION_ID
+    conditions = [("facility_affiliations_certification_number", "=", ccn)]
+    rows = client.datastore_query(ds_id, conditions=conditions, limit=limit)
+    return sorted({row["npi"] for row in rows if row.get("npi")})
+
+
+def filter_npis_by_specialty(client, npis, specialty, dataset_id=None, chunk_size=40):
     """Narrow a list of NPIs down to those whose CMS-reported primary
     specialty matches `specialty` (substring, case-insensitive).
     """
     if not npis or not specialty:
         return list(npis)
 
-    ndf_id = dataset_id or _resolve(client, NATIONAL_DOWNLOADABLE_TITLE_HINTS, DEFAULT_NATIONAL_DOWNLOADABLE_ID)
-    rows = client.fetch_rows(ndf_id, keyword=specialty, limit=fetch_limit)
-    if not rows:
-        return []
+    ds_id = dataset_id or NATIONAL_DOWNLOADABLE_FILE_ID
+    specialty_upper = specialty.upper()
+    matched = set()
 
-    columns = list(rows[0].keys())
-    npi_col = find_column(columns, "npi")
-    spec_col = find_column(columns, "pri_spec", "primary specialty", "specialty", "provider_type")
+    for chunk in _chunked(list(npis), chunk_size):
+        conditions = [
+            ("npi", "in", chunk),
+            ("pri_spec", "like", f"%{specialty_upper}%"),
+        ]
+        rows = client.datastore_query(ds_id, conditions=conditions, limit=chunk_size * 10)
+        chunk_set = set(chunk)
+        for row in rows:
+            npi = row.get("npi")
+            # Defensive client-side re-check in case the API doesn't AND the
+            # two conditions the way we expect -- cheap given chunk_size is small.
+            if npi in chunk_set and specialty_upper in str(row.get("pri_spec", "")).upper():
+                matched.add(npi)
 
-    specialty_npis = set()
-    for row in rows:
-        spec_value = str(row.get(spec_col, "")) if spec_col else ""
-        if specialty.lower() in spec_value.lower():
-            npi = row.get(npi_col) if npi_col else None
-            if npi:
-                specialty_npis.add(str(npi))
-
-    npi_set = {str(n) for n in npis}
-    return sorted(npi_set & specialty_npis)
+    return sorted(matched)

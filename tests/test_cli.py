@@ -7,7 +7,9 @@ def test_cli_demo_json_output(capsys):
     exit_code = main(["--hospital", "Springfield General Hospital", "--specialty", "Cardiology", "--demo", "--json"])
     assert exit_code == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["hospital"] == "Springfield General Hospital"
+    assert out["hospital"] == "SPRINGFIELD GENERAL HOSPITAL"
+    assert out["queried_hospital"] == "Springfield General Hospital"
+    assert out["hospital_ccn"] == "999001"
     assert out["matched_provider_count"] == 3
     assert out["total_cost_of_vacancy"] > 0
 
@@ -26,3 +28,11 @@ def test_cli_overrides_change_output(capsys):
     assert out["vacant_days"] == 30
     assert out["locum_coverage_component"] == 30000.0
     assert out["recruitment_component"] == 5000.0
+
+
+def test_cli_unknown_hospital_exits_nonzero_with_error_on_stderr(capsys):
+    exit_code = main(["--hospital", "Totally Nonexistent Hospital Name", "--specialty", "Cardiology", "--demo"])
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Error" in captured.err

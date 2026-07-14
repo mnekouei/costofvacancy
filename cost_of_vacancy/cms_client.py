@@ -16,6 +16,7 @@ import requests
 
 CATALOG_URL = "https://data.cms.gov/data.json"
 DATA_API_TEMPLATE = "https://data.cms.gov/data-api/v1/dataset/{dataset_id}/data"
+PROVIDER_DATA_QUERY_TEMPLATE = "https://data.cms.gov/provider-data/api/1/datastore/query/{dataset_id}/0"
 PAGE_SIZE = 500
 
 
@@ -112,3 +113,35 @@ class CMSClient:
     def columns_for(self, dataset_id):
         rows = self.fetch_rows(dataset_id, limit=1)
         return list(rows[0].keys()) if rows else []
+
+    @staticmethod
+    def _condition_params(conditions):
+        """Build DKAN ``conditions[N][property/operator/value]`` query params.
+
+        `conditions` is a list of (property, operator, value) tuples.
+        Multiple conditions are ANDed together by the datastore query API.
+        For operator "in", `value` should be a list -- `requests` encodes a
+        list-valued param as repeated `key=v1&key=v2`, which is exactly the
+        `conditions[N][value][]=v1&conditions[N][value][]=v2` shape DKAN expects.
+        """
+        params = {}
+        for i, (prop, operator, value) in enumerate(conditions):
+            params[f"conditions[{i}][property]"] = prop
+            params[f"conditions[{i}][operator]"] = operator
+            key = f"conditions[{i}][value][]" if operator == "in" else f"conditions[{i}][value]"
+            params[key] = value
+        return params
+
+    def datastore_query(self, dataset_id, conditions=None, limit=100, offset=0):
+        """Query a Provider Data Catalog dataset (e.g. Facility Affiliation,
+        Hospital General Information, National Downloadable File) via CMS's
+        DKAN datastore API, which supports server-side filtering -- required
+        since these datasets run into the millions of rows and can't be
+        paged through client-side.
+        """
+        url = PROVIDER_DATA_QUERY_TEMPLATE.format(dataset_id=dataset_id)
+        params = {"limit": limit, "offset": offset}
+        if conditions:
+            params.update(self._condition_params(conditions))
+        data = self._get_json(url, params=params)
+        return data.get("results", []) if isinstance(data, dict) else []
