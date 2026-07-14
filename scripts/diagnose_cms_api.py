@@ -1,64 +1,71 @@
-"""One-off diagnostic: run this in an environment with real internet access
-(e.g. Google Colab) to discover the current, correct CMS dataset ids and
-API URL shape. Paste the printed output back so cms_client.py /
-facility_affiliations.py / provider_utilization.py can be fixed to match
-reality instead of guessed defaults.
+"""Round 2: the provider-summary datasets (Medicare Physician & Other
+Practitioners) resolve fine via data.json with a long-UUID accessURL. The
+Provider Data Catalog datasets (Facility Affiliation, National Downloadable
+File) do NOT appear in data.json at all, and the short dataset id shown in
+their page URL (e.g. 27ea-46a8) 404s against data-api/v1/dataset/{id}/data.
+This script tries several plausible API shapes for those Provider Data
+Catalog sets directly, with short per-request timeouts so a dead endpoint
+doesn't hang the whole run.
 """
 import json
 
 import requests
 
-TITLES_OF_INTEREST = [
-    "facility affiliation",
-    "national downloadable file",
-    "medicare physician & other practitioners - by provider",
-]
+SHORT_IDS = {
+    "Facility Affiliation": "27ea-46a8",
+    "National Downloadable File": "mj5m-pzi6",
+}
+
+TIMEOUT = 12
 
 
-def dump(label, obj, limit=1500):
-    text = json.dumps(obj, indent=2)[:limit]
-    print(f"\n--- {label} ---\n{text}\n")
+def try_get(label, url, params=None):
+    try:
+        resp = requests.get(url, params=params, timeout=TIMEOUT)
+        print(f"[{resp.status_code}] {label}: {resp.url}")
+        if resp.ok:
+            try:
+                body = resp.json()
+                text = json.dumps(body, indent=2)
+                print(text[:1500])
+            except ValueError:
+                print(f"  (non-JSON body, {len(resp.content)} bytes)")
+        return resp if resp.ok else None
+    except requests.RequestException as exc:
+        print(f"[FAIL] {label}: {exc}")
+        return None
 
 
 def main():
-    print("=== 1. Site-wide DCAT catalog: data.cms.gov/data.json ===")
-    try:
-        catalog = requests.get("https://data.cms.gov/data.json", timeout=30).json()
-        datasets = catalog.get("dataset", [])
-        print(f"catalog has {len(datasets)} datasets")
-        for entry in datasets:
-            title = (entry.get("title") or "").lower()
-            if any(t in title for t in TITLES_OF_INTEREST):
-                dump(f"data.json match: {entry.get('title')}", entry)
-    except Exception as exc:
-        print(f"FAILED: {exc}")
+    for name, short_id in SHORT_IDS.items():
+        print(f"\n=== {name} ({short_id}) ===")
 
-    print("\n=== 2. Provider Data Catalog metastore ===")
-    for keyword in ("Facility Affiliation", "National Downloadable File"):
-        url = f"https://data.cms.gov/provider-data/api/1/metastore/schemas/dataset/items?keyword={keyword.replace(' ', '%20')}"
-        try:
-            resp = requests.get(url, timeout=30)
-            print(f"\nGET {url} -> {resp.status_code}")
-            if resp.ok:
-                items = resp.json()
-                for item in items[:3]:
-                    dump(f"metastore match for '{keyword}'", item)
-        except Exception as exc:
-            print(f"FAILED for {keyword!r}: {exc}")
+        # A: direct metastore item lookup (should be O(1), not a search)
+        try_get(
+            "metastore item detail",
+            f"https://data.cms.gov/provider-data/api/1/metastore/schemas/dataset/items/{short_id}",
+        )
 
-    print("\n=== 3. Try data-api/v1/dataset/{id}/data against a known-good id ===")
-    # Hospital General Information is widely cited as xubh-q36u -- use it as a
-    # control to confirm this URL *pattern* works at all, independent of the
-    # ids we're trying to discover for facility affiliation / specialty data.
-    for candidate_id in ["xubh-q36u"]:
-        url = f"https://data.cms.gov/data-api/v1/dataset/{candidate_id}/data?size=1"
-        try:
-            resp = requests.get(url, timeout=30)
-            print(f"GET {url} -> {resp.status_code}")
-            if resp.ok:
-                dump(f"sample row for {candidate_id}", resp.json())
-        except Exception as exc:
-            print(f"FAILED: {exc}")
+        # B: DKAN-style datastore query using the dataset id directly
+        try_get(
+            "datastore query by dataset id",
+            f"https://data.cms.gov/provider-data/api/1/datastore/query/{short_id}/0",
+            params={"limit": 1},
+        )
+
+        # C: same but as a top-level resource_id query param
+        try_get(
+            "datastore query via resource_id param",
+            "https://data.cms.gov/provider-data/api/1/datastore/query",
+            params={"resource_id": short_id, "limit": 1},
+        )
+
+    print("\n=== D: does data.cms.gov publish a separate provider-data catalog json? ===")
+    for url in [
+        "https://data.cms.gov/provider-data/data.json",
+        "https://data.cms.gov/provider-data/api/1/metastore/schemas/dataset/items",
+    ]:
+        try_get("catalog probe", url)
 
 
 if __name__ == "__main__":
