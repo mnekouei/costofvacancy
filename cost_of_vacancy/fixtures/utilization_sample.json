@@ -1,0 +1,8 @@
+[
+  {"Rndrng_NPI": "1000000001", "Rndrng_Prvdr_Type": "Cardiology", "Tot_Benes": "310", "Tot_Sbmtd_Chrg": "612000", "Tot_Mdcr_Alowd_Amt": "301000", "Tot_Mdcr_Pymt_Amt": "241000"},
+  {"Rndrng_NPI": "1000000002", "Rndrng_Prvdr_Type": "Cardiology", "Tot_Benes": "295", "Tot_Sbmtd_Chrg": "588000", "Tot_Mdcr_Alowd_Amt": "279000", "Tot_Mdcr_Pymt_Amt": "223000"},
+  {"Rndrng_NPI": "1000000003", "Rndrng_Prvdr_Type": "Cardiology", "Tot_Benes": "340", "Tot_Sbmtd_Chrg": "655000", "Tot_Mdcr_Alowd_Amt": "318000", "Tot_Mdcr_Pymt_Amt": "254000"},
+  {"Rndrng_NPI": "1000000006", "Rndrng_Prvdr_Type": "Family Practice", "Tot_Benes": "520", "Tot_Sbmtd_Chrg": "210000", "Tot_Mdcr_Alowd_Amt": "142000", "Tot_Mdcr_Pymt_Amt": "113000"},
+  {"Rndrng_NPI": "1000000007", "Rndrng_Prvdr_Type": "Family Practice", "Tot_Benes": "480", "Tot_Sbmtd_Chrg": "198000", "Tot_Mdcr_Alowd_Amt": "135000", "Tot_Mdcr_Pymt_Amt": "108000"},
+  {"Rndrng_NPI": "1000000008", "Rndrng_Prvdr_Type": "Cardiology", "Tot_Benes": "300", "Tot_Sbmtd_Chrg": "600000", "Tot_Mdcr_Alowd_Amt": "290000", "Tot_Mdcr_Pymt_Amt": "232000"}
+]
